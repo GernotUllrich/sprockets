@@ -1,3 +1,4 @@
+# frozen_string_literal: true
 require 'digest/md5'
 require 'digest/sha1'
 require 'digest/sha2'
@@ -44,12 +45,8 @@ module Sprockets
         digest << 'Symbol'.freeze
         digest << val.to_s
       },
-      Fixnum => ->(val, digest) {
-        digest << 'Fixnum'.freeze
-        digest << val.to_s
-      },
-      Bignum => ->(val, digest) {
-        digest << 'Bignum'.freeze
+      Integer => ->(val, digest) {
+        digest << 'Integer'.freeze
         digest << val.to_s
       },
       Array => ->(val, digest) {
@@ -66,13 +63,26 @@ module Sprockets
       },
       Set => ->(val, digest) {
         digest << 'Set'.freeze
-        ADD_VALUE_TO_DIGEST[Array].call(val.to_a, digest)
+        ADD_VALUE_TO_DIGEST[Array].call(val, digest)
       },
       Encoding => ->(val, digest) {
         digest << 'Encoding'.freeze
         digest << val.name
       },
     }
+    if 0.class != Integer # Ruby < 2.4
+      ADD_VALUE_TO_DIGEST[Fixnum] = ->(val, digest) {
+        digest << 'Integer'.freeze
+        digest << val.to_s
+      }
+      ADD_VALUE_TO_DIGEST[Bignum] = ->(val, digest) {
+        digest << 'Integer'.freeze
+        digest << val.to_s
+      }
+    end
+
+    ADD_VALUE_TO_DIGEST.compare_by_identity.rehash
+
     ADD_VALUE_TO_DIGEST.default_proc = ->(_, val) {
       raise TypeError, "couldn't digest #{ val }"
     }
@@ -87,10 +97,18 @@ module Sprockets
     #
     # Returns a String digest of the object.
     def digest(obj)
-      digest = digest_class.new
+      build_digest(obj).digest
+    end
 
-      ADD_VALUE_TO_DIGEST[obj.class].call(obj, digest)
-      digest.digest
+    # Internal: Generate a hexdigest for a nested JSON serializable object.
+    #
+    # The same as `pack_hexdigest(digest(obj))`.
+    #
+    # obj - A JSON serializable object.
+    #
+    # Returns a String digest of the object.
+    def hexdigest(obj)
+      build_digest(obj).hexdigest!
     end
 
     # Internal: Pack a binary digest to a hex encoded string.
@@ -99,7 +117,7 @@ module Sprockets
     #
     # Returns hex String.
     def pack_hexdigest(bin)
-      bin.unpack('H*').first
+      bin.unpack('H*'.freeze).first
     end
 
     # Internal: Unpack a hex encoded digest string into binary bytes.
@@ -170,5 +188,13 @@ module Sprockets
     def hexdigest_integrity_uri(hexdigest)
       integrity_uri(unpack_hexdigest(hexdigest))
     end
+
+    private
+      def build_digest(obj)
+        digest = digest_class.new
+
+        ADD_VALUE_TO_DIGEST[obj.class].call(obj, digest)
+        digest
+      end
   end
 end
